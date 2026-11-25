@@ -71,6 +71,46 @@ const STORAGE_KEYS = {
 const DEFAULT_ADMIN_EMAIL = 'yuda@pgcm.co.kr';
 const DEFAULT_ADMIN_PASSWORD = String.fromCharCode(89, 112, 100, 102, 48, 57, 49, 48, 48, 49);
 
+// Konfigurasi default Firebase agar otomatis online di semua perangkat tanpa copy-paste manual
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBiNs1ekLKzUv20MSZdrOsLR30BZV7FcDw',
+  authDomain: 'stock-mtc-db.firebaseapp.com',
+  projectId: 'stock-mtc-db',
+  storageBucket: 'stock-mtc-db.firebasestorage.app',
+  messagingSenderId: '126205447167',
+  appId: '1:126205447167:web:361120526dc031a37cb5ca'
+};
+
+const resolveInitialFirebaseJson = () => {
+  try {
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+      return typeof __firebase_config === 'string'
+        ? __firebase_config
+        : JSON.stringify(__firebase_config, null, 2);
+    }
+  } catch {
+    // Abaikan jika global __firebase_config tidak terdefinisi
+  }
+
+  try {
+    const envCfg = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FIREBASE_CONFIG;
+    if (envCfg) {
+      return typeof envCfg === 'string' ? envCfg : JSON.stringify(envCfg, null, 2);
+    }
+  } catch {
+    // Abaikan jika import.meta.env tidak tersedia
+  }
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.FB_CONFIG);
+    if (saved && saved.trim()) return saved;
+  } catch {
+    // Abaikan error akses localStorage
+  }
+
+  return JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2);
+};
+
 const I18N = {
   id: {
     appName: 'MaintStock Pro',
@@ -548,13 +588,7 @@ export default function App() {
   const [transactions, setTransactions] = useState(() => safeReadStorage(STORAGE_KEYS.TRANSACTIONS, createEmptyTransactions));
 
   // State Koneksi Firebase Realtime
-  const [fbJsonText, setFbJsonText] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEYS.FB_CONFIG) || '';
-    } catch {
-      return '';
-    }
-  });
+  const [fbJsonText, setFbJsonText] = useState(() => resolveInitialFirebaseJson());
   const [cloudStatus, setCloudStatus] = useState('disconnected'); // 'disconnected' | 'connecting' | 'connected' | 'error'
   const [cloudUserUid, setCloudUserUid] = useState('');
   const cloudDbRef = useRef(null);
@@ -884,16 +918,14 @@ export default function App() {
 
   // Coba sambungkan otomatis jika konfigurasi tersimpan atau tersedia di environment
   useEffect(() => {
-    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-      const envStr = typeof __firebase_config === 'string' ? __firebase_config : JSON.stringify(__firebase_config);
-      setFbJsonText(envStr);
-      connectFirebaseFromJson(envStr, true);
-    } else if (fbJsonText.trim()) {
-      connectFirebaseFromJson(fbJsonText, true);
+    const initialJson = resolveInitialFirebaseJson();
+    setFbJsonText(initialJson);
+    if (initialJson.trim()) {
+      void connectFirebaseFromJson(initialJson, true);
     }
   }, []);
 
-  // Listener snapshot Firestore saat terhubung (pertahankan data lokal bila cloud masih kosong setelah refresh)
+  // Listener snapshot Firestore saat terhubung (prioritaskan data cloud antar perangkat)
   useEffect(() => {
     if (cloudStatus !== 'connected' || !cloudDbRef.current) return;
     const dbInstance = cloudDbRef.current;
@@ -909,6 +941,7 @@ export default function App() {
         const remoteList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (remoteList.length > 0) {
           setSpareparts(remoteList);
+          safeWriteStorage(STORAGE_KEYS.SPAREPARTS, remoteList);
         } else {
           const cachedSp = safeReadStorage(STORAGE_KEYS.SPAREPARTS, createEmptySpareparts);
           if (cachedSp.length > 0) {
@@ -916,6 +949,9 @@ export default function App() {
             cachedSp.forEach((sp) => {
               void upsertSparepartCloud(sp);
             });
+          } else {
+            setSpareparts([]);
+            safeWriteStorage(STORAGE_KEYS.SPAREPARTS, []);
           }
         }
       },
@@ -934,6 +970,7 @@ export default function App() {
           .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         if (remoteTx.length > 0) {
           setTransactions(remoteTx);
+          safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, remoteTx);
         } else {
           const cachedTx = safeReadStorage(STORAGE_KEYS.TRANSACTIONS, createEmptyTransactions);
           if (cachedTx.length > 0) {
@@ -941,6 +978,9 @@ export default function App() {
             cachedTx.slice(0, 100).forEach((tx) => {
               void upsertTransactionCloud(tx);
             });
+          } else {
+            setTransactions([]);
+            safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, []);
           }
         }
       },
@@ -956,15 +996,19 @@ export default function App() {
       (snap) => {
         if (snap.exists()) {
           const remoteCfg = snap.data();
-          setConfig((prev) => ({
-            ...prev,
-            companyName: remoteCfg.companyName ?? prev.companyName,
-            subtitle: remoteCfg.subtitle ?? prev.subtitle,
-            accentColor: remoteCfg.accentColor ?? prev.accentColor,
-            sidebarStyle: remoteCfg.sidebarStyle ?? prev.sidebarStyle,
-            whatsapp: remoteCfg.whatsapp ?? prev.whatsapp,
-            email: remoteCfg.email ?? prev.email
-          }));
+          setConfig((prev) => {
+            const merged = {
+              ...prev,
+              companyName: remoteCfg.companyName ?? prev.companyName,
+              subtitle: remoteCfg.subtitle ?? prev.subtitle,
+              accentColor: remoteCfg.accentColor ?? prev.accentColor,
+              sidebarStyle: remoteCfg.sidebarStyle ?? prev.sidebarStyle,
+              whatsapp: remoteCfg.whatsapp ?? prev.whatsapp,
+              email: remoteCfg.email ?? prev.email
+            };
+            safeWriteStorage(STORAGE_KEYS.CONFIG, merged);
+            return merged;
+          });
         } else {
           const cachedCfg = safeReadStorage(STORAGE_KEYS.CONFIG, createInitialConfig);
           void upsertConfigCloud(cachedCfg);
