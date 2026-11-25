@@ -5,9 +5,7 @@ import {
   getFirestore,
   collection,
   doc,
-  getDoc,
   setDoc,
-  addDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -53,14 +51,10 @@ import {
   Database,
   Sun,
   Moon,
-  Languages,
   ScanBarcode,
-  Sparkles,
   Cloud,
-  CloudOff,
   RefreshCw,
-  Activity,
-  Printer
+  Activity
 } from 'lucide-react';
 
 // ============================================================================
@@ -201,7 +195,7 @@ const createEmptySpareparts = () => [];
 const createEmptyTransactions = () => [];
 
 // ============================================================================
-// FUNGSI UTILITAS FORMAT & PARSING
+// FUNGSI UTILITAS FORMAT, PARSING & DOWNLOAD EXCEL (.XLSX)
 // ============================================================================
 const formatRp = (num) => 'Rp ' + (Number(num) || 0).toLocaleString('id-ID');
 
@@ -266,6 +260,71 @@ const parseSimpleCsv = (csvText) => {
     });
     return obj;
   });
+};
+
+const escapeXml = (str) =>
+  String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const downloadRowsAsExcel = (rows, sheetName, fileName) => {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  if (typeof window.XLSX !== 'undefined') {
+    const wb = window.XLSX.utils.book_new();
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = Object.keys(rows[0]).map((key) => ({
+      wch: Math.max(key.length + 4, 16)
+    }));
+    window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    window.XLSX.writeFile(wb, fileName);
+    return;
+  }
+
+  // Fallback SpreadsheetML (.xls) agar kolom langsung terpisah rapi di Excel tanpa perlu Text to Columns
+  const headers = Object.keys(rows[0]);
+  const headerCells = headers
+    .map((h) => `<Cell><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`)
+    .join('');
+
+  const bodyRows = rows
+    .map((row) => {
+      const cells = headers
+        .map((h) => {
+          const val = row[h] ?? '';
+          const isNumeric = typeof val === 'number' && !Number.isNaN(val);
+          const cellType = isNumeric ? 'Number' : 'String';
+          return `<Cell><Data ss:Type="${cellType}">${escapeXml(val)}</Data></Cell>`;
+        })
+        .join('');
+      return `<Row>${cells}</Row>`;
+    })
+    .join('');
+
+  const xmlContent = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="${escapeXml(sheetName)}">
+  <Table>
+   <Row>${headerCells}</Row>
+   ${bodyRows}
+  </Table>
+ </Worksheet>
+</Workbook>`;
+
+  const safeXlsName = fileName.toLowerCase().endsWith('.xlsx')
+    ? fileName.slice(0, -5) + '.xls'
+    : fileName;
+  const blob = new Blob([xmlContent], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = safeXlsName;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 // ============================================================================
@@ -727,7 +786,6 @@ export default function App() {
       spCol,
       (snap) => {
         const remoteList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        skipNextCloudPushRef.current = true;
         setSpareparts(remoteList);
       },
       (err) => {
@@ -743,7 +801,6 @@ export default function App() {
         const remoteTx = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        skipNextCloudPushRef.current = true;
         setTransactions(remoteTx);
       },
       (err) => {
@@ -758,7 +815,6 @@ export default function App() {
       (snap) => {
         if (snap.exists()) {
           const remoteCfg = snap.data();
-          skipNextCloudPushRef.current = true;
           setConfig((prev) => ({
             ...prev,
             companyName: remoteCfg.companyName ?? prev.companyName,
@@ -868,6 +924,37 @@ export default function App() {
     }
   };
 
+  // Helper sinkronisasi satu item sparepart & transaksi ke Firestore jika terhubung
+  const persistMutationToCloud = async (spId, nextStock, txRecord) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current) return false;
+    try {
+      const dbInstance = cloudDbRef.current;
+      const currentAppId = cloudAppIdRef.current;
+      const spRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'spareparts', spId);
+      const txRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'transactions', txRecord.id);
+
+      await runTransaction(dbInstance, async (transaction) => {
+        const snap = await transaction.get(spRef);
+        const liveStock = snap.exists() ? Number(snap.data().currentStock) || 0 : nextStock;
+        const computedNext =
+          txRecord.type === 'IN'
+            ? liveStock + (Number(txRecord.qty) || 0)
+            : liveStock - (Number(txRecord.qty) || 0);
+        if (computedNext < 0) {
+          throw new Error('Stok cloud tidak mencukupi.');
+        }
+        transaction.update(spRef, { currentStock: computedNext, updatedAt: serverTimestamp() });
+        transaction.set(txRef, { ...txRecord, createdAt: serverTimestamp() });
+      });
+      return true;
+    } catch (err) {
+      if (!handleFirestorePermissionError(err)) {
+        console.warn('Cloud mutation sync warning:', err);
+      }
+      return false;
+    }
+  };
+
   // ==========================================================================
   // LOGIN & LOGOUT
   // ==========================================================================
@@ -936,12 +1023,21 @@ export default function App() {
   // ==========================================================================
   // FUTURISTIC QUICK SCANNER / COMMAND BAR (IN / OUT INSTAN VIA KODE PART)
   // ==========================================================================
-  const handleQuickScanSubmit = (e) => {
-    e.preventDefault();
-    const codeTrim = quickCode.trim();
-    const qtyNum = Math.max(1, Number(quickQty) || 1);
+  const handleQuickScanSubmit = async (e) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+
+    const codeTrim = String(quickCode || '').trim();
+    const qtyNum = Math.max(1, Math.floor(Number(quickQty) || 1));
+
     if (!codeTrim) {
       pushToast('Masukkan atau scan Kode Part terlebih dahulu.', 'warning');
+      return;
+    }
+
+    if (!Array.isArray(spareparts) || spareparts.length === 0) {
+      pushToast('Master sparepart masih kosong. Tambah part atau import stok awal dulu.', 'warning');
       return;
     }
 
@@ -960,35 +1056,40 @@ export default function App() {
       return;
     }
 
+    const price = Number(sp.unitPrice) || 0;
+    const newTx = {
+      id: `tx_scan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      sparepartId: sp.id,
+      code: sp.code,
+      sparepartName: sp.name,
+      category: sp.category || 'General Maintenance',
+      unit: sp.unit || 'pcs',
+      type: quickMode,
+      qty: qtyNum,
+      unitPrice: price,
+      totalValue: qtyNum * price,
+      date: defaultToday,
+      maintenanceType: quickMode === 'IN' ? 'Supplier Delivery / PO' : 'Preventive Maintenance (PM)',
+      woRef: 'QUICK-SCAN',
+      notes: `Quick ${quickMode} via Scanner/Command`,
+      recordedBy: config.email || DEFAULT_ADMIN_EMAIL
+    };
+
+    // Perbarui state lokal langsung agar responsif di semua tab
     setSpareparts((prev) =>
       prev.map((item) => (item.id === sp.id ? { ...item, currentStock: next } : item))
     );
+    setTransactions((prev) => [newTx, ...prev]);
 
-    const price = Number(sp.unitPrice) || 0;
-    setTransactions((prev) => [
-      {
-        id: `tx_scan_${Date.now()}`,
-        sparepartId: sp.id,
-        code: sp.code,
-        sparepartName: sp.name,
-        category: sp.category || 'General Maintenance',
-        unit: sp.unit || 'pcs',
-        type: quickMode,
-        qty: qtyNum,
-        unitPrice: price,
-        totalValue: qtyNum * price,
-        date: defaultToday,
-        maintenanceType: quickMode === 'IN' ? 'Supplier Delivery / PO' : 'Preventive Maintenance (PM)',
-        woRef: 'QUICK-SCAN',
-        notes: `Quick ${quickMode} via Scanner/Command`,
-        recordedBy: config.email || DEFAULT_ADMIN_EMAIL
-      },
-      ...prev
-    ]);
+    // Sinkronkan ke Firestore jika sudah terhubung
+    await persistMutationToCloud(sp.id, next, newTx);
 
     setQuickCode('');
     setQuickQty(1);
-    pushToast(`Quick ${quickMode}: ${sp.code} (${quickMode === 'IN' ? '+' : '-'}${qtyNum} ${sp.unit}).`, 'success');
+    pushToast(
+      `Quick ${quickMode}: ${sp.code} (${quickMode === 'IN' ? '+' : '-'}${qtyNum} ${sp.unit || 'pcs'}) -> Sisa ${next}`,
+      'success'
+    );
   };
 
   // ==========================================================================
@@ -1125,52 +1226,33 @@ export default function App() {
   const downloadImportTemplate = () => {
     const sampleRows = [
       {
-        'Kode Part': 'BRG-6205-2RS',
-        'Nama Sparepart': 'Ball Bearing 6205 2RS SKF',
+        'Kode Part': '',
+        'Nama Sparepart': '',
         Kategori: 'Mechanical & Bearing',
-        Mesin: 'Conveyor Line 1',
-        'Lokasi Rak': 'Rak A-01',
+        Mesin: '',
+        'Lokasi Rak': '',
         Satuan: 'pcs',
-        'Stok Awal': 20,
-        'Stok Saat Ini': 20,
+        'Stok Awal': 0,
+        'Stok Saat Ini': 0,
         'Min Stok (ROP)': 5,
-        'Harga Satuan': 65000
+        'Harga Satuan': 0
       },
       {
-        'Kode Part': 'SNS-E2E-X4ME1',
-        'Nama Sparepart': 'Proximity Sensor Inductive M12 NPN',
+        'Kode Part': '',
+        'Nama Sparepart': '',
         Kategori: 'Electrical & Sensor',
-        Mesin: 'Packing Machine 2',
-        'Lokasi Rak': 'Rak B-04',
+        Mesin: '',
+        'Lokasi Rak': '',
         Satuan: 'pcs',
-        'Stok Awal': 12,
-        'Stok Saat Ini': 12,
-        'Min Stok (ROP)': 4,
-        'Harga Satuan': 185000
+        'Stok Awal': 0,
+        'Stok Saat Ini': 0,
+        'Min Stok (ROP)': 5,
+        'Harga Satuan': 0
       }
     ];
 
-    if (typeof window.XLSX !== 'undefined') {
-      const wb = window.XLSX.utils.book_new();
-      const ws = window.XLSX.utils.json_to_sheet(sampleRows);
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Template_Sparepart');
-      window.XLSX.writeFile(wb, 'Template_Import_Sparepart_Maintenance.xlsx');
-      pushToast('Template Excel (.xlsx) diunduh.', 'success');
-    } else {
-      const headers = Object.keys(sampleRows[0]);
-      const csv = [
-        headers.join(','),
-        ...sampleRows.map((r) => headers.map((h) => `"${String(r[h]).replace(/"/g, '""')}"`).join(','))
-      ].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'Template_Import_Sparepart_Maintenance.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-      pushToast('Template CSV diunduh.', 'success');
-    }
+    downloadRowsAsExcel(sampleRows, 'Template_Sparepart', 'Template_Import_Sparepart_Maintenance.xlsx');
+    pushToast('Template Excel siap input data diunduh.', 'success');
   };
 
   const handleImportFile = async (e) => {
@@ -1179,14 +1261,35 @@ export default function App() {
 
     try {
       let rawRows = [];
-      if (typeof window.XLSX !== 'undefined' && !file.name.toLowerCase().endsWith('.csv')) {
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith('.csv')) {
+        const text = await file.text();
+        rawRows = parseSimpleCsv(text);
+      } else if (typeof window.XLSX !== 'undefined') {
         const buffer = await file.arrayBuffer();
         const wb = window.XLSX.read(buffer, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         rawRows = window.XLSX.utils.sheet_to_json(ws, { defval: '' });
       } else {
         const text = await file.text();
-        rawRows = parseSimpleCsv(text);
+        if (text.trim().startsWith('<')) {
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(text, 'text/xml');
+          const rows = Array.from(xmlDoc.getElementsByTagName('Row'));
+          if (rows.length > 1) {
+            const headers = Array.from(rows[0].getElementsByTagName('Data')).map((d) => d.textContent || '');
+            rawRows = rows.slice(1).map((r) => {
+              const vals = Array.from(r.getElementsByTagName('Data')).map((d) => d.textContent || '');
+              const obj = {};
+              headers.forEach((h, idx) => {
+                obj[h] = vals[idx] ?? '';
+              });
+              return obj;
+            });
+          }
+        } else {
+          rawRows = parseSimpleCsv(text);
+        }
       }
 
       if (!Array.isArray(rawRows) || rawRows.length === 0) {
@@ -1215,7 +1318,7 @@ export default function App() {
         .filter((item) => item.code && item.name);
 
       if (parsedItems.length === 0) {
-        pushToast('Tidak ada baris valid.', 'warning');
+        pushToast('Tidak ada baris valid (pastikan Kode Part & Nama Sparepart terisi).', 'warning');
         return;
       }
 
@@ -1299,23 +1402,12 @@ export default function App() {
       window.XLSX.writeFile(wb, `Laporan_Inventory_Maintenance_${selectedMonth}.xlsx`);
       pushToast(`Excel ${selectedMonth} diunduh.`, 'success');
     } else {
-      const headers = ['Tanggal', 'Jenis', 'Kode Part', 'Nama Sparepart', 'Qty', 'Nilai (Rp)', 'Keterangan'];
-      const csv = [
-        headers.join(','),
-        ...txRows.map((r) =>
-          [r.Tanggal, r.Jenis, r['Kode Part'], r['Nama Sparepart'], r.Qty, r['Nilai (Rp)'], r.Keterangan]
-            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-            .join(',')
-        )
-      ].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Laporan_Inventory_Maintenance_${selectedMonth}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      pushToast(`CSV ${selectedMonth} diunduh.`, 'success');
+      downloadRowsAsExcel(
+        masterRows.length > 0 ? masterRows : [{ 'Kode Part': '', 'Nama Sparepart': '' }],
+        `Master_${selectedMonth}`,
+        `Laporan_Inventory_Maintenance_${selectedMonth}.xls`
+      );
+      pushToast(`Laporan ${selectedMonth} diunduh.`, 'success');
     }
   };
 
@@ -1399,44 +1491,25 @@ export default function App() {
       {
         Tanggal: defaultToday,
         Jenis: 'IN',
-        'Kode Part': 'BRG-6205-2RS',
-        Qty: 10,
+        'Kode Part': '',
+        Qty: 0,
         'Jenis Maintenance': 'Supplier Delivery / PO',
-        'No WO / PO': 'PO-2026-001',
-        Keterangan: 'Penerimaan stok masuk dari supplier'
+        'No WO / PO': '',
+        Keterangan: ''
       },
       {
         Tanggal: defaultToday,
         Jenis: 'OUT',
-        'Kode Part': 'BRG-6205-2RS',
-        Qty: 3,
+        'Kode Part': '',
+        Qty: 0,
         'Jenis Maintenance': 'Preventive Maintenance (PM)',
-        'No WO / PO': 'WO-PM-001',
-        Keterangan: 'Pemakaian rutin maintenance conveyor'
+        'No WO / PO': '',
+        Keterangan: ''
       }
     ];
 
-    if (typeof window.XLSX !== 'undefined') {
-      const wb = window.XLSX.utils.book_new();
-      const ws = window.XLSX.utils.json_to_sheet(sampleMutations);
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Template_Mutasi_IN_OUT');
-      window.XLSX.writeFile(wb, 'Template_Batch_Mutasi_IN_OUT.xlsx');
-      pushToast('Template Excel Batch IN/OUT diunduh.', 'success');
-    } else {
-      const headers = Object.keys(sampleMutations[0]);
-      const csv = [
-        headers.join(','),
-        ...sampleMutations.map((r) => headers.map((h) => `"${String(r[h]).replace(/"/g, '""')}"`).join(','))
-      ].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'Template_Batch_Mutasi_IN_OUT.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-      pushToast('Template CSV Batch IN/OUT diunduh.', 'success');
-    }
+    downloadRowsAsExcel(sampleMutations, 'Template_Mutasi_IN_OUT', 'Template_Batch_Mutasi_IN_OUT.xlsx');
+    pushToast('Template Excel Batch IN/OUT siap input diunduh.', 'success');
   };
 
   const handleImportBatchMutations = async (e) => {
@@ -1445,14 +1518,35 @@ export default function App() {
 
     try {
       let rawRows = [];
-      if (typeof window.XLSX !== 'undefined' && !file.name.toLowerCase().endsWith('.csv')) {
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith('.csv')) {
+        const text = await file.text();
+        rawRows = parseSimpleCsv(text);
+      } else if (typeof window.XLSX !== 'undefined') {
         const buffer = await file.arrayBuffer();
         const wb = window.XLSX.read(buffer, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         rawRows = window.XLSX.utils.sheet_to_json(ws, { defval: '' });
       } else {
         const text = await file.text();
-        rawRows = parseSimpleCsv(text);
+        if (text.trim().startsWith('<')) {
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(text, 'text/xml');
+          const rows = Array.from(xmlDoc.getElementsByTagName('Row'));
+          if (rows.length > 1) {
+            const headers = Array.from(rows[0].getElementsByTagName('Data')).map((d) => d.textContent || '');
+            rawRows = rows.slice(1).map((r) => {
+              const vals = Array.from(r.getElementsByTagName('Data')).map((d) => d.textContent || '');
+              const obj = {};
+              headers.forEach((h, idx) => {
+                obj[h] = vals[idx] ?? '';
+              });
+              return obj;
+            });
+          }
+        } else {
+          rawRows = parseSimpleCsv(text);
+        }
       }
 
       if (!Array.isArray(rawRows) || rawRows.length === 0) {
@@ -2141,9 +2235,6 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base sm:text-lg font-extrabold">{pageMeta.title}</h1>
-                <span className="hidden xl:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-                  <Sparkles className="w-3 h-3" /> v3.0
-                </span>
               </div>
               <p className={`text-xs hidden sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {pageMeta.subtitle}
@@ -2422,7 +2513,7 @@ export default function App() {
                     <FileUp className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold">Excel / CSV Master & Stok Awal</h3>
+                    <h3 className="text-sm font-bold">Excel / CSV Master &amp; Stok Awal</h3>
                     <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       .xlsx / .xls / .csv • Auto-update by Kode Part
                     </p>
