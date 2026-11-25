@@ -218,6 +218,11 @@ const safeWriteStorage = (key, value) => {
   }
 };
 
+const sanitizeDocId = (rawId, prefix = 'doc') => {
+  const clean = String(rawId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return clean || `${prefix}_${Date.now()}`;
+};
+
 const parseExcelNumber = (val, fallback = 0) => {
   if (typeof val === 'number' && !Number.isNaN(val)) return val;
   const cleaned = String(val || '').replace(/[^0-9.-]/g, '');
@@ -283,7 +288,6 @@ const downloadRowsAsExcel = (rows, sheetName, fileName) => {
     return;
   }
 
-  // Fallback SpreadsheetML (.xls) agar kolom langsung terpisah rapi di Excel tanpa perlu Text to Columns
   const headers = Object.keys(rows[0]);
   const headerCells = headers
     .map((h) => `<Cell><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`)
@@ -692,6 +696,139 @@ export default function App() {
   // ==========================================================================
   // INTEGRASI FIREBASE FIRESTORE REALTIME SYNC
   // ==========================================================================
+  const handleFirestorePermissionError = (err) => {
+    if (err && err.code === 'permission-denied') {
+      cloudDbRef.current = null;
+      setCloudStatus('error');
+      if (!permissionErrorNotifiedRef.current) {
+        permissionErrorNotifiedRef.current = true;
+        pushToast(
+          'Akses Firestore ditolak (permission-denied). Aktifkan Anonymous Auth & Firestore Rules di Firebase Console. Mode Lokal tetap aktif.',
+          'warning'
+        );
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const upsertSparepartCloud = async (spItem) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current || !spItem) return;
+    const cleanId = sanitizeDocId(spItem.id, 'sp');
+    try {
+      await setDoc(
+        doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', cleanId),
+        {
+          code: spItem.code || '',
+          name: spItem.name || '',
+          category: spItem.category || 'General Maintenance',
+          machine: spItem.machine || '',
+          unit: spItem.unit || 'pcs',
+          initialStock: Number(spItem.initialStock) || 0,
+          currentStock: Number(spItem.currentStock) || 0,
+          minStock: Number(spItem.minStock) || 0,
+          unitPrice: Number(spItem.unitPrice) || 0,
+          location: spItem.location || '',
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      if (!handleFirestorePermissionError(err)) {
+        console.warn('Upsert sparepart cloud warning:', err);
+      }
+    }
+  };
+
+  const deleteSparepartCloud = async (spId) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current || !spId) return;
+    const cleanId = sanitizeDocId(spId, 'sp');
+    try {
+      await deleteDoc(
+        doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', cleanId)
+      );
+    } catch (err) {
+      if (!handleFirestorePermissionError(err)) {
+        console.warn('Delete sparepart cloud warning:', err);
+      }
+    }
+  };
+
+  const upsertTransactionCloud = async (txItem) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current || !txItem) return;
+    const cleanTxId = sanitizeDocId(txItem.id, 'tx');
+    try {
+      await setDoc(
+        doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'transactions', cleanTxId),
+        {
+          sparepartId: txItem.sparepartId || '',
+          code: txItem.code || '',
+          sparepartName: txItem.sparepartName || '',
+          category: txItem.category || 'General Maintenance',
+          unit: txItem.unit || 'pcs',
+          type: txItem.type || 'IN',
+          qty: Number(txItem.qty) || 0,
+          diff: Number(txItem.diff) || 0,
+          systemStock: Number(txItem.systemStock) || 0,
+          physicalStock: Number(txItem.physicalStock) || 0,
+          unitPrice: Number(txItem.unitPrice) || 0,
+          totalValue: Number(txItem.totalValue) || 0,
+          date: txItem.date || defaultToday,
+          maintenanceType: txItem.maintenanceType || '',
+          woRef: txItem.woRef || '',
+          notes: txItem.notes || '',
+          recordedBy: txItem.recordedBy || config.email || DEFAULT_ADMIN_EMAIL,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      if (!handleFirestorePermissionError(err)) {
+        console.warn('Upsert transaction cloud warning:', err);
+      }
+    }
+  };
+
+  const upsertConfigCloud = async (cfgObj) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current || !cfgObj) return;
+    try {
+      const cfgRef = doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'system_config', 'main');
+      await setDoc(
+        cfgRef,
+        {
+          companyName: cfgObj.companyName || 'PGCM Maintenance',
+          subtitle: cfgObj.subtitle || 'Sparepart Inventory Control',
+          accentColor: cfgObj.accentColor || 'blue',
+          sidebarStyle: cfgObj.sidebarStyle || 'dark',
+          whatsapp: cfgObj.whatsapp || '082270189045',
+          email: cfgObj.email || DEFAULT_ADMIN_EMAIL,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      if (!handleFirestorePermissionError(err)) {
+        console.warn('Upsert config cloud warning:', err);
+      }
+    }
+  };
+
+  const clearCloudCollection = async (colName, items) => {
+    if (cloudStatus !== 'connected' || !cloudDbRef.current || !Array.isArray(items)) return;
+    for (const item of items) {
+      if (!item || !item.id) continue;
+      try {
+        await deleteDoc(
+          doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', colName, sanitizeDocId(item.id, colName))
+        );
+      } catch (err) {
+        if (!handleFirestorePermissionError(err)) {
+          console.warn(`Clear ${colName} item warning:`, err);
+        }
+      }
+    }
+  };
+
   const connectFirebaseFromJson = async (rawJson, silent = false) => {
     const trimmed = (rawJson || '').trim();
     if (!trimmed) {
@@ -745,22 +882,6 @@ export default function App() {
     }
   };
 
-  const handleFirestorePermissionError = (err) => {
-    if (err && err.code === 'permission-denied') {
-      cloudDbRef.current = null;
-      setCloudStatus('error');
-      if (!permissionErrorNotifiedRef.current) {
-        permissionErrorNotifiedRef.current = true;
-        pushToast(
-          'Akses Firestore ditolak (permission-denied). Aktifkan Anonymous Auth & Firestore Rules di Firebase Console. Mode Lokal tetap aktif.',
-          'warning'
-        );
-      }
-      return true;
-    }
-    return false;
-  };
-
   // Coba sambungkan otomatis jika konfigurasi tersimpan atau tersedia di environment
   useEffect(() => {
     if (typeof __firebase_config !== 'undefined' && __firebase_config) {
@@ -772,7 +893,7 @@ export default function App() {
     }
   }, []);
 
-  // Listener snapshot Firestore saat terhubung
+  // Listener snapshot Firestore saat terhubung (pertahankan data lokal bila cloud masih kosong setelah refresh)
   useEffect(() => {
     if (cloudStatus !== 'connected' || !cloudDbRef.current) return;
     const dbInstance = cloudDbRef.current;
@@ -786,7 +907,17 @@ export default function App() {
       spCol,
       (snap) => {
         const remoteList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setSpareparts(remoteList);
+        if (remoteList.length > 0) {
+          setSpareparts(remoteList);
+        } else {
+          const cachedSp = safeReadStorage(STORAGE_KEYS.SPAREPARTS, createEmptySpareparts);
+          if (cachedSp.length > 0) {
+            setSpareparts(cachedSp);
+            cachedSp.forEach((sp) => {
+              void upsertSparepartCloud(sp);
+            });
+          }
+        }
       },
       (err) => {
         if (!handleFirestorePermissionError(err)) {
@@ -801,7 +932,17 @@ export default function App() {
         const remoteTx = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        setTransactions(remoteTx);
+        if (remoteTx.length > 0) {
+          setTransactions(remoteTx);
+        } else {
+          const cachedTx = safeReadStorage(STORAGE_KEYS.TRANSACTIONS, createEmptyTransactions);
+          if (cachedTx.length > 0) {
+            setTransactions(cachedTx);
+            cachedTx.slice(0, 100).forEach((tx) => {
+              void upsertTransactionCloud(tx);
+            });
+          }
+        }
       },
       (err) => {
         if (!handleFirestorePermissionError(err)) {
@@ -824,6 +965,9 @@ export default function App() {
             whatsapp: remoteCfg.whatsapp ?? prev.whatsapp,
             email: remoteCfg.email ?? prev.email
           }));
+        } else {
+          const cachedCfg = safeReadStorage(STORAGE_KEYS.CONFIG, createInitialConfig);
+          void upsertConfigCloud(cachedCfg);
         }
       },
       (err) => {
@@ -848,71 +992,14 @@ export default function App() {
     }
 
     try {
-      const dbInstance = cloudDbRef.current;
-      const currentAppId = cloudAppIdRef.current;
-
-      const cfgRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'system_config', 'main');
-      await setDoc(
-        cfgRef,
-        {
-          companyName: config.companyName,
-          subtitle: config.subtitle,
-          accentColor: config.accentColor,
-          sidebarStyle: config.sidebarStyle,
-          whatsapp: config.whatsapp,
-          email: config.email,
-          updatedAt: serverTimestamp()
-        },
-        { merge: true }
-      );
+      await upsertConfigCloud(config);
 
       for (const sp of spareparts) {
-        const cleanId = String(sp.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') || `sp_${Date.now()}`;
-        await setDoc(
-          doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'spareparts', cleanId),
-          {
-            code: sp.code || '',
-            name: sp.name || '',
-            category: sp.category || 'General Maintenance',
-            machine: sp.machine || '',
-            unit: sp.unit || 'pcs',
-            initialStock: Number(sp.initialStock) || 0,
-            currentStock: Number(sp.currentStock) || 0,
-            minStock: Number(sp.minStock) || 0,
-            unitPrice: Number(sp.unitPrice) || 0,
-            location: sp.location || '',
-            updatedAt: serverTimestamp()
-          },
-          { merge: true }
-        );
+        await upsertSparepartCloud(sp);
       }
 
       for (const tx of transactions.slice(0, 100)) {
-        const cleanTxId = String(tx.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') || `tx_${Date.now()}`;
-        await setDoc(
-          doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'transactions', cleanTxId),
-          {
-            sparepartId: tx.sparepartId || '',
-            code: tx.code || '',
-            sparepartName: tx.sparepartName || '',
-            category: tx.category || 'General Maintenance',
-            unit: tx.unit || 'pcs',
-            type: tx.type || 'IN',
-            qty: Number(tx.qty) || 0,
-            diff: Number(tx.diff) || 0,
-            systemStock: Number(tx.systemStock) || 0,
-            physicalStock: Number(tx.physicalStock) || 0,
-            unitPrice: Number(tx.unitPrice) || 0,
-            totalValue: Number(tx.totalValue) || 0,
-            date: tx.date || defaultToday,
-            maintenanceType: tx.maintenanceType || '',
-            woRef: tx.woRef || '',
-            notes: tx.notes || '',
-            recordedBy: tx.recordedBy || config.email,
-            updatedAt: serverTimestamp()
-          },
-          { merge: true }
-        );
+        await upsertTransactionCloud(tx);
       }
 
       pushToast('Sinkronisasi penuh ke Firebase Firestore berhasil.', 'success');
@@ -930,8 +1017,10 @@ export default function App() {
     try {
       const dbInstance = cloudDbRef.current;
       const currentAppId = cloudAppIdRef.current;
-      const spRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'spareparts', spId);
-      const txRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'transactions', txRecord.id);
+      const cleanSpId = sanitizeDocId(spId, 'sp');
+      const cleanTxId = sanitizeDocId(txRecord.id, 'tx');
+      const spRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'spareparts', cleanSpId);
+      const txRef = doc(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'transactions', cleanTxId);
 
       await runTransaction(dbInstance, async (transaction) => {
         const snap = await transaction.get(spRef);
@@ -943,8 +1032,12 @@ export default function App() {
         if (computedNext < 0) {
           throw new Error('Stok cloud tidak mencukupi.');
         }
-        transaction.update(spRef, { currentStock: computedNext, updatedAt: serverTimestamp() });
-        transaction.set(txRef, { ...txRecord, createdAt: serverTimestamp() });
+        transaction.set(
+          spRef,
+          { currentStock: computedNext, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+        transaction.set(txRef, { ...txRecord, id: cleanTxId, createdAt: serverTimestamp() });
       });
       return true;
     } catch (err) {
@@ -1075,13 +1168,16 @@ export default function App() {
       recordedBy: config.email || DEFAULT_ADMIN_EMAIL
     };
 
-    // Perbarui state lokal langsung agar responsif di semua tab
-    setSpareparts((prev) =>
-      prev.map((item) => (item.id === sp.id ? { ...item, currentStock: next } : item))
+    const updatedSpareparts = spareparts.map((item) =>
+      item.id === sp.id ? { ...item, currentStock: next } : item
     );
-    setTransactions((prev) => [newTx, ...prev]);
+    const updatedTransactions = [newTx, ...transactions];
 
-    // Sinkronkan ke Firestore jika sudah terhubung
+    setSpareparts(updatedSpareparts);
+    setTransactions(updatedTransactions);
+    safeWriteStorage(STORAGE_KEYS.SPAREPARTS, updatedSpareparts);
+    safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, updatedTransactions);
+
     await persistMutationToCloud(sp.id, next, newTx);
 
     setQuickCode('');
@@ -1176,24 +1272,20 @@ export default function App() {
 
     try {
       if (editingSpId) {
-        setSpareparts((prev) => prev.map((s) => (s.id === editingSpId ? { ...s, ...payload } : s)));
-        if (cloudStatus === 'connected' && cloudDbRef.current) {
-          await updateDoc(
-            doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', editingSpId),
-            { ...payload, updatedAt: serverTimestamp() }
-          );
-        }
+        const updatedRecord = { id: editingSpId, ...payload };
+        const nextList = spareparts.map((s) => (s.id === editingSpId ? { ...s, ...payload } : s));
+        setSpareparts(nextList);
+        safeWriteStorage(STORAGE_KEYS.SPAREPARTS, nextList);
+        await upsertSparepartCloud(updatedRecord);
         pushToast('Sparepart diperbarui.', 'success');
       } else {
         const newId = `sp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        setSpareparts((prev) => [...prev, { id: newId, ...payload }]);
+        const newRecord = { id: newId, ...payload };
+        const nextList = [...spareparts, newRecord];
+        setSpareparts(nextList);
+        safeWriteStorage(STORAGE_KEYS.SPAREPARTS, nextList);
         if (!txSparepartId) setTxSparepartId(newId);
-        if (cloudStatus === 'connected' && cloudDbRef.current) {
-          await setDoc(
-            doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', newId),
-            { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }
-          );
-        }
+        await upsertSparepartCloud(newRecord);
         pushToast('Barang & stok awal tersimpan.', 'success');
       }
       setSpModalOpen(false);
@@ -1206,17 +1298,11 @@ export default function App() {
   const handleDeleteSparepart = async (item) => {
     const ok = await requestConfirm('Hapus Sparepart', `Hapus "${item.code} - ${item.name}"?`);
     if (!ok) return;
-    setSpareparts((prev) => prev.filter((s) => s.id !== item.id));
+    const nextList = spareparts.filter((s) => s.id !== item.id);
+    setSpareparts(nextList);
+    safeWriteStorage(STORAGE_KEYS.SPAREPARTS, nextList);
     if (txSparepartId === item.id) setTxSparepartId('');
-    if (cloudStatus === 'connected' && cloudDbRef.current) {
-      try {
-        await deleteDoc(
-          doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', item.id)
-        );
-      } catch (err) {
-        console.warn('Cloud delete warning:', err);
-      }
-    }
+    await deleteSparepartCloud(item.id);
     pushToast('Sparepart dihapus.', 'success');
   };
 
@@ -1327,21 +1413,30 @@ export default function App() {
 
       let added = 0;
       let updated = 0;
+      const next = [...spareparts];
+      const touchedCloudItems = [];
 
-      setSpareparts((prev) => {
-        const next = [...prev];
-        parsedItems.forEach((item) => {
-          const idx = next.findIndex((s) => String(s.code || '').trim().toLowerCase() === item.code.toLowerCase());
-          if (idx !== -1) {
-            next[idx] = { ...next[idx], ...item };
-            updated += 1;
-          } else {
-            next.push({ id: `sp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, ...item });
-            added += 1;
-          }
-        });
-        return next;
+      parsedItems.forEach((item) => {
+        const idx = next.findIndex((s) => String(s.code || '').trim().toLowerCase() === item.code.toLowerCase());
+        if (idx !== -1) {
+          const mergedItem = { ...next[idx], ...item };
+          next[idx] = mergedItem;
+          touchedCloudItems.push(mergedItem);
+          updated += 1;
+        } else {
+          const createdItem = { id: `sp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, ...item };
+          next.push(createdItem);
+          touchedCloudItems.push(createdItem);
+          added += 1;
+        }
       });
+
+      setSpareparts(next);
+      safeWriteStorage(STORAGE_KEYS.SPAREPARTS, next);
+
+      for (const spItem of touchedCloudItems) {
+        await upsertSparepartCloud(spItem);
+      }
 
       pushToast(`Import selesai: +${added} baru, ${updated} diperbarui.`, 'success');
     } catch (err) {
@@ -1459,22 +1554,31 @@ export default function App() {
     };
 
     try {
+      const updatedSpareparts = spareparts.map((item) =>
+        item.id === sp.id ? { ...item, currentStock: nextStock } : item
+      );
+      const updatedTransactions = [newTx, ...transactions];
+
+      setSpareparts(updatedSpareparts);
+      setTransactions(updatedTransactions);
+      safeWriteStorage(STORAGE_KEYS.SPAREPARTS, updatedSpareparts);
+      safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, updatedTransactions);
+
       if (cloudStatus === 'connected' && cloudDbRef.current) {
-        const spRef = doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', sp.id);
-        const txRef = doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'transactions', newTxId);
+        const spRef = doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'spareparts', sanitizeDocId(sp.id, 'sp'));
+        const txRef = doc(cloudDbRef.current, 'artifacts', cloudAppIdRef.current, 'public', 'data', 'transactions', sanitizeDocId(newTxId, 'tx'));
         await runTransaction(cloudDbRef.current, async (transaction) => {
           const snap = await transaction.get(spRef);
           const liveStock = snap.exists() ? Number(snap.data().currentStock) || 0 : currentStock;
           const computedNext = txType === 'IN' ? liveStock + qtyNum : liveStock - qtyNum;
           if (computedNext < 0) throw new Error('Stok cloud tidak mencukupi.');
-          transaction.update(spRef, { currentStock: computedNext, updatedAt: serverTimestamp() });
-          transaction.set(txRef, { ...newTx, createdAt: serverTimestamp() });
+          transaction.set(
+            spRef,
+            { currentStock: computedNext, updatedAt: serverTimestamp() },
+            { merge: true }
+          );
+          transaction.set(txRef, { ...newTx, id: sanitizeDocId(newTxId, 'tx'), createdAt: serverTimestamp() });
         });
-      } else {
-        setSpareparts((prev) =>
-          prev.map((item) => (item.id === sp.id ? { ...item, currentStock: nextStock } : item))
-        );
-        setTransactions((prev) => [newTx, ...prev]);
       }
 
       setTxQty('');
@@ -1630,10 +1734,26 @@ export default function App() {
         return;
       }
 
-      setSpareparts((prev) =>
-        prev.map((s) => (s.id in workingStockById ? { ...s, currentStock: workingStockById[s.id] } : s))
+      const updatedSpareparts = spareparts.map((s) =>
+        s.id in workingStockById ? { ...s, currentStock: workingStockById[s.id] } : s
       );
-      setTransactions((prev) => [...appliedTransactions.reverse(), ...prev]);
+      const reversedBatch = [...appliedTransactions].reverse();
+      const updatedTransactions = [...reversedBatch, ...transactions];
+
+      setSpareparts(updatedSpareparts);
+      setTransactions(updatedTransactions);
+      safeWriteStorage(STORAGE_KEYS.SPAREPARTS, updatedSpareparts);
+      safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, updatedTransactions);
+
+      for (const spId of Object.keys(workingStockById)) {
+        const matchedSp = updatedSpareparts.find((s) => s.id === spId);
+        if (matchedSp) {
+          await upsertSparepartCloud(matchedSp);
+        }
+      }
+      for (const txItem of reversedBatch) {
+        await upsertTransactionCloud(txItem);
+      }
 
       pushToast(
         skipped > 0
@@ -1652,7 +1772,10 @@ export default function App() {
   const handleResetTransactionsOnly = async () => {
     const ok = await requestConfirm(t.resetTx, 'Hapus seluruh riwayat transaksi IN, OUT, dan Opname?');
     if (!ok) return;
+    const prevTx = [...transactions];
     setTransactions([]);
+    safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, []);
+    await clearCloudCollection('transactions', prevTx);
     pushToast('Semua riwayat transaksi direset.', 'success');
   };
 
@@ -1662,10 +1785,16 @@ export default function App() {
       'Hapus semua master sparepart, stok awal, dan transaksi untuk memulai dari nol?'
     );
     if (!ok) return;
+    const prevSp = [...spareparts];
+    const prevTx = [...transactions];
     setSpareparts([]);
     setTransactions([]);
     setOpnameInputs({});
     setTxSparepartId('');
+    safeWriteStorage(STORAGE_KEYS.SPAREPARTS, []);
+    safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, []);
+    await clearCloudCollection('spareparts', prevSp);
+    await clearCloudCollection('transactions', prevTx);
     pushToast('Semua data direset ke nol.', 'success');
   };
 
@@ -1737,18 +1866,36 @@ export default function App() {
       });
     });
 
-    setSpareparts((prev) => prev.map((s) => (s.id in updatedMap ? { ...s, currentStock: updatedMap[s.id] } : s)));
-    setTransactions((prev) => [...opnameLogs, ...prev]);
+    const updatedSpareparts = spareparts.map((s) =>
+      s.id in updatedMap ? { ...s, currentStock: updatedMap[s.id] } : s
+    );
+    const updatedTransactions = [...opnameLogs, ...transactions];
+
+    setSpareparts(updatedSpareparts);
+    setTransactions(updatedTransactions);
+    safeWriteStorage(STORAGE_KEYS.SPAREPARTS, updatedSpareparts);
+    safeWriteStorage(STORAGE_KEYS.TRANSACTIONS, updatedTransactions);
+
+    for (const spId of Object.keys(updatedMap)) {
+      const matchedSp = updatedSpareparts.find((s) => s.id === spId);
+      if (matchedSp) {
+        await upsertSparepartCloud(matchedSp);
+      }
+    }
+    for (const logItem of opnameLogs) {
+      await upsertTransactionCloud(logItem);
+    }
+
     pushToast(`Opname ${selectedMonth} tersimpan (${adjustments.length} item).`, 'success');
   };
 
   // ==========================================================================
   // PENGATURAN, TEMA, BAHASA & PASSWORD
   // ==========================================================================
-  const handleSaveSettings = (e) => {
+  const handleSaveSettings = async (e) => {
     e.preventDefault();
-    setConfig((prev) => ({
-      ...prev,
+    const nextCfg = {
+      ...config,
       companyName: settingsForm.companyName.trim() || 'PGCM Maintenance',
       subtitle: settingsForm.subtitle.trim() || 'Sparepart Inventory Control',
       accentColor: settingsForm.accentColor,
@@ -1758,7 +1905,10 @@ export default function App() {
       whatsapp: settingsForm.whatsapp.trim() || '082270189045',
       email: settingsForm.email.trim() || DEFAULT_ADMIN_EMAIL,
       adminEmail: settingsForm.email.trim() || DEFAULT_ADMIN_EMAIL
-    }));
+    };
+    setConfig(nextCfg);
+    safeWriteStorage(STORAGE_KEYS.CONFIG, nextCfg);
+    await upsertConfigCloud(nextCfg);
     pushToast('Pengaturan sistem & tema disimpan.', 'success');
   };
 
@@ -1778,7 +1928,9 @@ export default function App() {
       return;
     }
 
-    setConfig((prev) => ({ ...prev, adminPassword: newPassInput }));
+    const nextCfg = { ...config, adminPassword: newPassInput };
+    setConfig(nextCfg);
+    safeWriteStorage(STORAGE_KEYS.CONFIG, nextCfg);
     setOldPassInput('');
     setNewPassInput('');
     setConfirmPassInput('');
