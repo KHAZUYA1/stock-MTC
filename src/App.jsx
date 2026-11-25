@@ -1132,7 +1132,12 @@ export default function App() {
       (acc, s) => acc + (Number(s.currentStock) || 0) * (Number(s.unitPrice) || 0),
       0
     );
-    const lowStockItems = spareparts.filter((s) => (Number(s.currentStock) || 0) <= (Number(s.minStock) || 0));
+    // Alert muncul hanya jika stok saat ini <= ROP; otomatis hilang jika stok > ROP
+    const lowStockItems = spareparts.filter((s) => {
+      const cur = Number(s.currentStock) || 0;
+      const rop = Number(s.minStock) || 0;
+      return cur <= rop;
+    });
 
     const monthTx = transactions.filter((t) => (t.date || '').startsWith(selectedMonth));
     const monthInTx = monthTx.filter((t) => t.type === 'IN');
@@ -2414,75 +2419,75 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
         <header
-          className={`border-b px-4 sm:px-6 py-3.5 sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 ${
+          className={`border-b px-4 sm:px-6 py-2.5 sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2.5 ${
             isDark ? 'bg-slate-900/95 border-slate-800 backdrop-blur-md' : 'bg-white border-slate-200'
           }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className={`lg:hidden p-2 rounded-xl border ${
+              className={`lg:hidden p-1.5 rounded-lg border ${
                 isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="w-4 h-4" />
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-extrabold">{pageMeta.title}</h1>
+                <h1 className="text-sm sm:text-[15px] font-bold tracking-tight">{pageMeta.title}</h1>
               </div>
-              <p className={`text-xs hidden sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <p className={`text-[11px] hidden sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {pageMeta.subtitle}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value || defaultMonth)}
-              className={`px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
+              className={`px-2.5 py-1.5 rounded-lg border text-[11px] sm:text-xs font-medium focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
             />
 
             <button
               type="button"
               onClick={handleExportMonthly}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
             >
-              <FileSpreadsheet className="w-4 h-4" />
+              <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>{t.exportExcel}</span>
             </button>
 
             <button
               type="button"
               onClick={handleSendWhatsApp}
-              className="px-3 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition"
+              className="px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
             >
-              <MessageCircle className="w-4 h-4" />
+              <MessageCircle className="w-3.5 h-3.5" />
               <span className="hidden md:inline">{t.waReport}</span>
             </button>
 
             <button
               type="button"
               onClick={handleSendEmail}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
             >
-              <Mail className="w-4 h-4" />
+              <Mail className="w-3.5 h-3.5" />
               <span className="hidden md:inline">{t.emailReport}</span>
             </button>
           </div>
         </header>
 
         {/* Futuristic Quick Scan / Command Strip */}
-        <div className="px-4 sm:px-6 pt-4 max-w-[1600px] w-full mx-auto">
+        <div className="px-4 sm:px-6 pt-3 max-w-[1600px] w-full mx-auto">
           <form
             onSubmit={handleQuickScanSubmit}
-            className={`rounded-2xl border p-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 ${surfaceCard}`}
+            className={`rounded-xl border px-3 py-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 ${surfaceCard}`}
           >
-            <div className="flex items-center gap-2 text-xs font-bold text-cyan-500 px-1 shrink-0">
-              <ScanBarcode className="w-4 h-4" />
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-cyan-500 px-1 shrink-0">
+              <ScanBarcode className="w-3.5 h-3.5" />
               <span className="font-mono uppercase">Quick Scan</span>
             </div>
 
@@ -2491,14 +2496,14 @@ export default function App() {
               value={quickCode}
               onChange={(e) => setQuickCode(e.target.value)}
               placeholder={t.quickScanPlaceholder}
-              className={`flex-1 px-3 py-2 rounded-xl border text-xs sm:text-sm font-mono focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
+              className={`flex-1 px-2.5 py-1.5 rounded-lg border text-xs font-mono focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
             />
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <select
                 value={quickMode}
                 onChange={(e) => setQuickMode(e.target.value)}
-                className={`px-3 py-2 rounded-xl border text-xs font-bold focus:outline-none ${inputSurface}`}
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold focus:outline-none ${inputSurface}`}
               >
                 <option value="OUT">OUT (-)</option>
                 <option value="IN">IN (+)</option>
@@ -2510,12 +2515,12 @@ export default function App() {
                 step="1"
                 value={quickQty}
                 onChange={(e) => setQuickQty(e.target.value)}
-                className={`w-20 px-2.5 py-2 rounded-xl border text-xs sm:text-sm font-bold text-center focus:outline-none ${inputSurface}`}
+                className={`w-16 px-2 py-1.5 rounded-lg border text-xs font-bold text-center tabular-nums focus:outline-none ${inputSurface}`}
               />
 
               <button
                 type="submit"
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-sm transition shrink-0 ${accentClasses.primaryBtn}`}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition shrink-0 ${accentClasses.primaryBtn}`}
               >
                 Apply
               </button>
@@ -2524,7 +2529,7 @@ export default function App() {
         </div>
 
         {/* Main Content */}
-        <main className="flex-1 p-4 sm:p-6 space-y-6 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 p-4 sm:px-6 sm:py-4 space-y-4 max-w-[1600px] w-full mx-auto">
           {/* ================================================================ */}
           {/* TAB 1: DASHBOARD                                                 */}
           {/* ================================================================ */}
@@ -2652,23 +2657,23 @@ export default function App() {
           {/* TAB 2: STOK AWAL & MASTER PART                                  */}
           {/* ================================================================ */}
           {activeTab === 'spareparts' && (
-            <section className="space-y-4">
-              <div className={`rounded-2xl p-5 border shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 ${surfaceCard}`}>
-                <div className="flex flex-col sm:flex-row gap-3 flex-1">
+            <section className="space-y-3">
+              <div className={`rounded-xl p-3.5 border shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 ${surfaceCard}`}>
+                <div className="flex flex-col sm:flex-row gap-2 flex-1">
                   <div className="relative flex-1">
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Kode / Nama / Mesin / Rak..."
-                      className={`w-full pl-9 pr-4 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
+                      className={`w-full pl-8 pr-3 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
                     />
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
                   </div>
                   <select
                     value={categoryFilter}
                     onChange={(e) => setCategoryFilter(e.target.value)}
-                    className={`px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
                   >
                     <option value="ALL">ALL</option>
                     {CATEGORIES.map((c) => (
@@ -2680,7 +2685,7 @@ export default function App() {
                   <select
                     value={stockStatusFilter}
                     onChange={(e) => setStockStatusFilter(e.target.value)}
-                    className={`px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 ${accentClasses.ring} ${inputSurface}`}
                   >
                     <option value="ALL">ALL</option>
                     <option value="LOW">LOW / ROP</option>
@@ -2691,28 +2696,28 @@ export default function App() {
                 <button
                   type="button"
                   onClick={openAddSparepartModal}
-                  className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 shrink-0 shadow-sm transition ${accentClasses.primaryBtn}`}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 shadow-xs transition ${accentClasses.primaryBtn}`}
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5" />
                   <span>+ Part</span>
                 </button>
               </div>
 
               {/* Import Massal Master / Stok Awal */}
               <div
-                className={`rounded-2xl p-4 border flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                className={`rounded-xl px-4 py-2.5 border flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${
                   isDark ? 'bg-blue-950/30 border-blue-800/50' : 'bg-blue-50/70 border-blue-200/80'
                 }`}
               >
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5">
-                    <FileUp className="w-4 h-4" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                    <FileUp className="w-3.5 h-3.5" />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold">Excel / CSV Master &amp; Stok Awal</h3>
-                    <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <h3 className="text-xs font-bold">Excel / CSV Master &amp; Stok Awal</h3>
+                    <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       .xlsx / .xls / .csv • Auto-update by Kode Part
-                    </p>
+                    </span>
                   </div>
                 </div>
 
@@ -2720,27 +2725,27 @@ export default function App() {
                   <button
                     type="button"
                     onClick={downloadImportTemplate}
-                    className={`px-3.5 py-2 rounded-xl border text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition ${inputSurface}`}
+                    className={`px-3 py-1.5 rounded-lg border text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition ${inputSurface}`}
                   >
-                    <Download className="w-4 h-4 text-blue-500" />
+                    <Download className="w-3.5 h-3.5 text-blue-500" />
                     <span>Template</span>
                   </button>
 
-                  <label className="cursor-pointer px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition">
-                    <Upload className="w-4 h-4" />
+                  <label className="cursor-pointer px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 shadow-xs transition">
+                    <Upload className="w-3.5 h-3.5" />
                     <span>Import</span>
                     <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFile} className="hidden" />
                   </label>
                 </div>
               </div>
 
-              {/* Tabel Master Sparepart & Batch IN/OUT */}
-              <div className={`rounded-2xl p-5 border shadow-xs space-y-4 ${surfaceCard}`}>
-                <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+              {/* Tabel Master Sparepart & Batch IN/OUT (Gaya Grid ERP ECOUNT) */}
+              <div className={`rounded-xl p-4 border shadow-xs space-y-3 ${surfaceCard}`}>
+                <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2.5 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                   <div>
-                    <h3 className="text-base font-bold">{t.navSpareparts}</h3>
-                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      Batch IN/OUT Excel &amp; Master Table
+                    <h3 className="text-sm font-bold">{t.navSpareparts}</h3>
+                    <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Batch IN/OUT Excel &amp; Master Table • {filteredSpareparts.length} item
                     </p>
                   </div>
 
@@ -2748,13 +2753,13 @@ export default function App() {
                     <button
                       type="button"
                       onClick={downloadBatchMutationTemplate}
-                      className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition ${inputSurface}`}
+                      className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 transition ${inputSurface}`}
                     >
                       <Download className="w-3.5 h-3.5 text-blue-500" />
                       <span>Template IN/OUT</span>
                     </button>
 
-                    <label className="cursor-pointer px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
+                    <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-xs transition">
                       <Upload className="w-3.5 h-3.5" />
                       <span>Import Batch IN/OUT</span>
                       <input
@@ -2771,25 +2776,29 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr
-                        className={`border-b text-[11px] font-bold uppercase tracking-wider ${
-                          isDark ? 'bg-slate-950/60 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+                        className={`border-y text-[10px] font-bold uppercase tracking-wider ${
+                          isDark
+                            ? 'bg-slate-950/80 border-slate-800 text-slate-400'
+                            : 'bg-slate-100/90 border-slate-200 text-slate-600'
                         }`}
                       >
-                        <th className="py-3.5 px-4">Part</th>
-                        <th className="py-3.5 px-4">Category / Machine</th>
-                        <th className="py-3.5 px-4">Rack</th>
-                        <th className="py-3.5 px-4 text-right">Init</th>
-                        <th className="py-3.5 px-4 text-right">Stock</th>
-                        <th className="py-3.5 px-4 text-right">ROP</th>
-                        <th className="py-3.5 px-4 text-right">Price</th>
-                        <th className="py-3.5 px-4 text-right">Value</th>
-                        <th className="py-3.5 px-4 text-center">Action</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80">Kode Part</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80">Nama Sparepart</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80">Category</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80">Machine</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80">Rack</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80 text-right">Init</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80 text-right">Stock</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80 text-right">ROP</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80 text-right">Price</th>
+                        <th className="py-2 px-2.5 border-r border-slate-200/60 dark:border-slate-800/80 text-right">Value</th>
+                        <th className="py-2 px-2 text-center">Act</th>
                       </tr>
                     </thead>
-                    <tbody className={`divide-y text-sm ${isDark ? 'divide-slate-800' : 'divide-slate-100'}`}>
+                    <tbody className={`divide-y text-[11px] tabular-nums ${isDark ? 'divide-slate-800/80' : 'divide-slate-200/70'}`}>
                       {filteredSpareparts.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="py-8 px-4 text-center text-slate-400 text-sm">
+                          <td colSpan={11} className="py-6 px-4 text-center text-slate-400 text-xs">
                             0 items
                           </td>
                         </tr>
@@ -2798,50 +2807,63 @@ export default function App() {
                           const cur = Number(item.currentStock) || 0;
                           const min = Number(item.minStock) || 0;
                           const price = Number(item.unitPrice) || 0;
-                          const isLow = cur <= min;
+                          const isCritical = cur <= min;
                           return (
-                            <tr key={item.id} className={isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50/80'}>
-                              <td className="py-3 px-4">
-                                <div className="font-bold font-mono">{item.code}</div>
-                                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{item.name}</div>
+                            <tr
+                              key={item.id}
+                              className={`leading-tight ${isDark ? 'hover:bg-slate-800/50' : 'hover:bg-blue-50/40'}`}
+                            >
+                              <td className="py-1.5 px-2.5 font-semibold font-mono text-[11px] border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {item.code}
                               </td>
-                              <td className="py-3 px-4">
-                                <div className="text-xs font-medium">{item.category}</div>
-                                <div className="text-[11px] text-slate-400">{item.machine || '-'}</div>
+                              <td className="py-1.5 px-2.5 text-[11px] font-medium border-r border-slate-200/50 dark:border-slate-800/60">
+                                {item.name}
                               </td>
-                              <td className="py-3 px-4 text-xs font-mono text-slate-400">{item.location || '-'}</td>
-                              <td className="py-3 px-4 text-right font-medium text-slate-400">
+                              <td className="py-1.5 px-2.5 text-[11px] border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {item.category}
+                              </td>
+                              <td className="py-1.5 px-2.5 text-[11px] text-slate-400 border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {item.machine || '-'}
+                              </td>
+                              <td className="py-1.5 px-2.5 text-[11px] font-mono text-slate-400 border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {item.location || '-'}
+                              </td>
+                              <td className="py-1.5 px-2.5 text-right text-[11px] text-slate-400 border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
                                 {(Number(item.initialStock) || 0).toLocaleString('id-ID')} {item.unit || 'pcs'}
                               </td>
-                              <td className="py-3 px-4 text-right">
+                              <td className="py-1.5 px-2.5 text-right border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
                                 <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${
-                                    isLow ? 'bg-red-500/15 text-red-400' : 'bg-emerald-500/15 text-emerald-400'
+                                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                                    isCritical ? 'bg-red-500/15 text-red-400' : 'bg-emerald-500/15 text-emerald-400'
                                   }`}
                                 >
                                   {cur.toLocaleString('id-ID')} {item.unit || 'pcs'}
                                 </span>
                               </td>
-                              <td className="py-3 px-4 text-right text-xs text-slate-400">
+                              <td className="py-1.5 px-2.5 text-right text-[11px] text-slate-400 border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
                                 {min.toLocaleString('id-ID')}
                               </td>
-                              <td className="py-3 px-4 text-right text-xs">{formatRp(price)}</td>
-                              <td className="py-3 px-4 text-right text-xs font-semibold">{formatRp(cur * price)}</td>
-                              <td className="py-3 px-4 text-center">
-                                <div className="inline-flex items-center gap-1">
+                              <td className="py-1.5 px-2.5 text-right text-[11px] border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {formatRp(price)}
+                              </td>
+                              <td className="py-1.5 px-2.5 text-right text-[11px] font-semibold border-r border-slate-200/50 dark:border-slate-800/60 whitespace-nowrap">
+                                {formatRp(cur * price)}
+                              </td>
+                              <td className="py-1.5 px-2 text-center whitespace-nowrap">
+                                <div className="inline-flex items-center gap-0.5">
                                   <button
                                     type="button"
                                     onClick={() => openEditSparepartModal(item)}
-                                    className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-500/10 transition"
+                                    className="p-1 rounded text-blue-500 hover:bg-blue-500/10 transition"
                                   >
-                                    <Pencil className="w-4 h-4" />
+                                    <Pencil className="w-3.5 h-3.5" />
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteSparepart(item)}
-                                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition"
+                                    className="p-1 rounded text-red-500 hover:bg-red-500/10 transition"
                                   >
-                                    <Trash2 className="w-4 h-4" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               </td>
